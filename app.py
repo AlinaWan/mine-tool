@@ -22,8 +22,8 @@ DEFAULT_BAR_THICKNESS_PERCENTAGE = 0.15
 DEFAULT_WHITE_AREA_WIDTH_INCREASE = 5
 DEFAULT_GREY_LINE_MIN_AREA = 10
 DEFAULT_PREDICTION_ENABLED = True
-DEFAULT_LOOKAHEAD_FACTOR = 0.05
-DEFAULT_EXPONENTIAL_POWER = 1.05
+DEFAULT_LOOKAHEAD_FACTOR = 0.01
+DEFAULT_EXPONENTIAL_POWER = 1.015
 
 # --- Config File Handling ---
 CONFIG_FILE = 'config.ini'
@@ -343,7 +343,7 @@ def processing_loop():
                     prediction_offset = LOOKAHEAD_FACTOR * pow(abs(current_arc_velocity), EXPONENTIAL_POWER)
                     
                     if current_arc_velocity < 0:
-                        trigger_distance = arc_distance + prediction_offset
+                        trigger_distance = arc_distance - prediction_offset
                     else:
                         trigger_distance = arc_distance
                 else:
