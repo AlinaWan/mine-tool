@@ -8,6 +8,8 @@ Mine Tool is currently a Proof of Concept (PoC) Python script designed for parti
 
 https://github.com/user-attachments/assets/7cb4eda6-5795-487b-8c07-e1e567bf5345
 
+https://github.com/user-attachments/assets/f866eea4-4e1b-4c5b-9cd4-2b22d6bf2d56
+
 https://github.com/user-attachments/assets/29b83713-15a5-46f7-b250-d54cef50f851
 
 # Setup Instructions
