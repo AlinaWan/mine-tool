@@ -16,7 +16,7 @@ import configparser # Import configparser
 DEFAULT_ROI_X1, DEFAULT_ROI_Y1, DEFAULT_ROI_X2, DEFAULT_ROI_Y2 = 960, 437, 1080, 557
 DEFAULT_HEX_GREY = "#485163"
 DEFAULT_HEX_WHITE = "#cecece"
-DEFAULT_COLOR_TOLERANCE = 20
+DEFAULT_COLOR_TOLERANCE = 15
 DEFAULT_MIDDLE_THRESHOLD = 15
 DEFAULT_CLICK_COOLDOWN_DURATION = 0.5
 
@@ -226,7 +226,7 @@ def processing_loop():
 
             screenshot_bgr = get_screenshot(ROI_X1, ROI_Y1, ROI_X2, ROI_Y2)
             if screenshot_bgr is None:
-                time.sleep(0.05)
+                time.sleep(0.001)
                 continue
 
             display_image_bgr = screenshot_bgr.copy()
