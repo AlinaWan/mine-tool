@@ -8,17 +8,19 @@ import sys
 import tkinter as tk
 import threading
 import queue
-import configparser # Import configparser
+import configparser
 
 # --- Configuration ---
-# Default values for configuration. These will be used if config.ini is not found
-# or if specific values are missing.
+# Default values for configuration.
 DEFAULT_ROI_X1, DEFAULT_ROI_Y1, DEFAULT_ROI_X2, DEFAULT_ROI_Y2 = 960, 437, 1080, 557
 DEFAULT_HEX_GREY = "#485163"
 DEFAULT_HEX_WHITE = "#cecece"
 DEFAULT_COLOR_TOLERANCE = 15
 DEFAULT_MIDDLE_THRESHOLD = 15
 DEFAULT_CLICK_COOLDOWN_DURATION = 0.5
+DEFAULT_BAR_THICKNESS_PERCENTAGE = 0.15
+DEFAULT_WHITE_AREA_WIDTH_INCREASE = 5
+DEFAULT_GREY_LINE_MIN_AREA = 10
 
 # --- Config File Handling ---
 CONFIG_FILE = 'config.ini'
@@ -40,7 +42,10 @@ def load_config():
             'HEX_GREY': DEFAULT_HEX_GREY,
             'HEX_WHITE': DEFAULT_HEX_WHITE,
             'COLOR_TOLERANCE': str(DEFAULT_COLOR_TOLERANCE),
-            'MIDDLE_THRESHOLD': str(DEFAULT_MIDDLE_THRESHOLD)
+            'MIDDLE_THRESHOLD': str(DEFAULT_MIDDLE_THRESHOLD),
+            'BAR_THICKNESS_PERCENTAGE': str(DEFAULT_BAR_THICKNESS_PERCENTAGE),
+            'WHITE_AREA_WIDTH_INCREASE': str(DEFAULT_WHITE_AREA_WIDTH_INCREASE),
+            'GREY_LINE_MIN_AREA': str(DEFAULT_GREY_LINE_MIN_AREA)
         }
         config['Automation'] = {
             'CLICK_COOLDOWN_DURATION': str(DEFAULT_CLICK_COOLDOWN_DURATION)
@@ -48,7 +53,6 @@ def load_config():
         with open(CONFIG_FILE, 'w') as configfile:
             config.write(configfile)
         print(f"Default '{CONFIG_FILE}' created. Please review and adjust values if needed.")
-        # Reload the config after creating it
         config.read(CONFIG_FILE)
 
     # Read values, converting to appropriate types
@@ -62,6 +66,9 @@ def load_config():
     
     color_tolerance = config.getint('Detection', 'COLOR_TOLERANCE', fallback=DEFAULT_COLOR_TOLERANCE)
     middle_threshold = config.getint('Detection', 'MIDDLE_THRESHOLD', fallback=DEFAULT_MIDDLE_THRESHOLD)
+    bar_thickness_percentage = config.getfloat('Detection', 'BAR_THICKNESS_PERCENTAGE', fallback=DEFAULT_BAR_THICKNESS_PERCENTAGE)
+    white_area_width_increase = config.getint('Detection', 'WHITE_AREA_WIDTH_INCREASE', fallback=DEFAULT_WHITE_AREA_WIDTH_INCREASE)
+    grey_line_min_area = config.getint('Detection', 'GREY_LINE_MIN_AREA', fallback=DEFAULT_GREY_LINE_MIN_AREA)
     
     click_cooldown_duration = config.getfloat('Automation', 'CLICK_COOLDOWN_DURATION', fallback=DEFAULT_CLICK_COOLDOWN_DURATION)
 
@@ -69,7 +76,10 @@ def load_config():
         'ROI_X1': roi_x1, 'ROI_Y1': roi_y1, 'ROI_X2': roi_x2, 'ROI_Y2': roi_y2,
         'HEX_GREY': hex_grey, 'HEX_WHITE': hex_white,
         'COLOR_TOLERANCE': color_tolerance, 'MIDDLE_THRESHOLD': middle_threshold,
-        'CLICK_COOLDOWN_DURATION': click_cooldown_duration
+        'CLICK_COOLDOWN_DURATION': click_cooldown_duration,
+        'BAR_THICKNESS_PERCENTAGE': bar_thickness_percentage,
+        'WHITE_AREA_WIDTH_INCREASE': white_area_width_increase,
+        'GREY_LINE_MIN_AREA': grey_line_min_area
     }
 
 # Load configuration at script start
@@ -82,6 +92,9 @@ HEX_WHITE = settings['HEX_WHITE']
 COLOR_TOLERANCE = settings['COLOR_TOLERANCE']
 MIDDLE_THRESHOLD = settings['MIDDLE_THRESHOLD']
 CLICK_COOLDOWN_DURATION = settings['CLICK_COOLDOWN_DURATION']
+BAR_THICKNESS_PERCENTAGE = settings['BAR_THICKNESS_PERCENTAGE']
+WHITE_AREA_WIDTH_INCREASE = settings['WHITE_AREA_WIDTH_INCREASE']
+GREY_LINE_MIN_AREA = settings['GREY_LINE_MIN_AREA']
 
 # Mouse controller setup
 mouse = MouseController()
@@ -98,6 +111,11 @@ mask_queue_bar = queue.Queue(maxsize=1)
 # Variables for cooldown mechanism
 cooldown_active = False
 cooldown_start_time = 0
+
+# Velocity tracking variables
+last_grey_angle = None
+last_grey_time = None
+current_grey_velocity = 0.0
 
 # --- Helper Functions ---
 
@@ -119,16 +137,24 @@ def get_screenshot(x1, y1, x2, y2):
     except Exception as e:
         return None
 
-def find_colored_area_bgr(bgr_image, target_bgr, color_tolerance, min_area=50):
+def find_colored_area_bgr(bgr_image, target_bgr, color_tolerance, min_area=50, expand_width=0, limit_mask=None):
     """
     Detects a colored area within a BGR image using a color range around the target BGR.
-    Finds the largest contour, and returns its centroid, contour points,
-    mask, and rotated bounding box information.
+    Expands the detected area by `expand_width` if specified.
+    Can be limited to a specific area using `limit_mask`.
     """
+    # Apply the limiting mask if provided
+    if limit_mask is not None:
+        bgr_image = cv2.bitwise_and(bgr_image, bgr_image, mask=limit_mask)
+
     lower_bound = np.array([max(0, c - color_tolerance) for c in target_bgr])
     upper_bound = np.array([min(255, c + color_tolerance) for c in target_bgr])
 
     mask = cv2.inRange(bgr_image, lower_bound, upper_bound)
+    
+    if expand_width > 0:
+        kernel = np.ones((expand_width, expand_width), np.uint8)
+        mask = cv2.dilate(mask, kernel, iterations=1)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -153,40 +179,41 @@ def find_colored_area_bgr(bgr_image, target_bgr, color_tolerance, min_area=50):
 
     return (cX, cY), largest_contour, mask, rect
 
-def detect_curved_bar(image_bgr, min_bar_area=500):
+def detect_curved_bar(image_bgr, roi_width, roi_height, thickness_percentage):
     """
-    Attempts to detect the general area of the curved bar.
-    This is a simplification: it looks for the largest dark region.
+    Creates a mask for the 1st quadrant of a semi-circle and a corresponding
+    contour for visualization. This function will always return a mask and a contour,
+    regardless of the image content.
     """
-    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-
-    _, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY_INV)
-
-    kernel = np.ones((5,5),np.uint8)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    if not contours:
-        return None, thresh
-
-    candidate_bar_contour = None
-    max_area = 0
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > min_bar_area:
-            x, y, w, h = cv2.boundingRect(contour)
-            aspect_ratio = float(w)/h
-            if (0.3 < aspect_ratio < 3.0 and area / (w*h) > 0.4) or (area > max_area):
-                if area > max_area:
-                    max_area = area
-                    candidate_bar_contour = contour
+    # 1. Define the bar's geometry based on ROI dimensions
+    center_x, center_y = 0, roi_height
     
-    if candidate_bar_contour is None:
-        return None, thresh
+    outer_radius = min(roi_width, roi_height)
+    thickness = int(outer_radius * thickness_percentage)
+    inner_radius = outer_radius - thickness
 
-    return candidate_bar_contour, thresh
+    # Ensure radii are positive
+    if inner_radius < 0:
+        inner_radius = 0
+
+    # 2. Create an empty mask
+    mask = np.zeros((roi_height, roi_width), dtype=np.uint8)
+
+    # 3. Draw the inner and outer semi-circles on the mask
+    # The angles are 270 to 360 degrees for the 1st quadrant.
+    cv2.ellipse(mask, (center_x, center_y), (outer_radius, outer_radius),
+                0, 270, 360, 255, -1)
+    
+    cv2.ellipse(mask, (center_x, center_y), (inner_radius, inner_radius),
+                0, 270, 360, 0, -1)
+
+    # 4. Create a contour from the generated mask for visualization
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if contours:
+        return contours[0], mask
+    else:
+        return None, mask
 
 def on_press(key):
     """Callback for keyboard listener."""
@@ -209,7 +236,7 @@ TARGET_WHITE_BGR = hex_to_bgr(HEX_WHITE)
 
 # --- Main Processing Loop (runs in a separate thread) ---
 def processing_loop():
-    global running, cooldown_active, cooldown_start_time
+    global running, cooldown_active, cooldown_start_time, last_grey_angle, last_grey_time, current_grey_velocity
     print("Starting detection script. Press 'Esc' to stop.")
     print(f"Monitoring region: ({ROI_X1},{ROI_Y1}) to ({ROI_X2},{ROI_Y2})")
     print(f"Target Grey BGR: {TARGET_GREY_BGR}, Target White BGR: {TARGET_WHITE_BGR}")
@@ -222,7 +249,7 @@ def processing_loop():
             # Check if cooldown is active
             if cooldown_active:
                 if time.time() - cooldown_start_time >= CLICK_COOLDOWN_DURATION:
-                    cooldown_active = False # Cooldown finished
+                    cooldown_active = False
 
             screenshot_bgr = get_screenshot(ROI_X1, ROI_Y1, ROI_X2, ROI_Y2)
             if screenshot_bgr is None:
@@ -231,9 +258,21 @@ def processing_loop():
 
             display_image_bgr = screenshot_bgr.copy()
 
-            # 2. Detect White Area using BGR
+            # 1. Detect Curved Bar (generate a mask of the valid area)
+            bar_contour, bar_mask = detect_curved_bar(
+                screenshot_bgr, ROI_X2 - ROI_X1, ROI_Y2 - ROI_Y1, BAR_THICKNESS_PERCENTAGE
+            )
+            
+            if bar_contour is not None:
+                cv2.drawContours(display_image_bgr, [bar_contour], -1, (0, 0, 255), 2)
+                if bar_contour.shape[0] > 0:
+                    cv2.putText(display_image_bgr, "Bar", (bar_contour[0][0][0] + 10, bar_contour[0][0][1] - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
+            # 2. Detect White Area using BGR, limited by the bar mask
             white_center, white_contour, white_mask, _ = find_colored_area_bgr(
-                screenshot_bgr, TARGET_WHITE_BGR, COLOR_TOLERANCE
+                screenshot_bgr, TARGET_WHITE_BGR, COLOR_TOLERANCE, 
+                expand_width=WHITE_AREA_WIDTH_INCREASE, limit_mask=bar_mask
             )
             if white_center:
                 cv2.circle(display_image_bgr, white_center, 7, (0, 255, 0), -1)
@@ -241,10 +280,14 @@ def processing_loop():
                 cv2.putText(display_image_bgr, "White", (white_center[0] + 10, white_center[1] - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-            # 3. Detect Grey Line using BGR and get rotation info
+            # 3. Detect Grey Line using BGR, limited by the bar mask
             grey_center, grey_contour, grey_mask, grey_rect = find_colored_area_bgr(
-                screenshot_bgr, TARGET_GREY_BGR, COLOR_TOLERANCE
+                screenshot_bgr, TARGET_GREY_BGR, COLOR_TOLERANCE, 
+                min_area=GREY_LINE_MIN_AREA, # <-- Use the new constant here
+                limit_mask=bar_mask
             )
+            
+            # --- Velocity Calculation & Display ---
             if grey_center:
                 cv2.circle(display_image_bgr, grey_center, 5, (255, 0, 0), -1)
                 cv2.drawContours(display_image_bgr, [grey_contour], -1, (255, 0, 0), 2)
@@ -262,36 +305,58 @@ def processing_loop():
                     start_x = int(x - length * np.cos(radians))
                     start_y = int(y - length * np.sin(radians))
                     cv2.line(display_image_bgr, (start_x, start_y), (end_x, end_y), (255, 0, 255), 2)
-
-            # 4. Detect Curved Bar (for visualization)
-            bar_contour, bar_mask = detect_curved_bar(screenshot_bgr)
-            if bar_contour is not None:
-                cv2.drawContours(display_image_bgr, [bar_contour], -1, (0, 0, 255), 2)
-                if bar_contour.shape[0] > 0:
-                    cv2.putText(display_image_bgr, "Bar", (bar_contour[0][0][0] + 10, bar_contour[0][0][1] - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-
-            # 5. Logic for mouse release
+                
+                # Semi-circle center (bottom-left of ROI)
+                semi_circle_center_x = 0
+                semi_circle_center_y = ROI_Y2 - ROI_Y1
+                
+                dx = grey_center[0] - semi_circle_center_x
+                dy = grey_center[1] - semi_circle_center_y
+                
+                angle_rad = np.arctan2(dy, dx)
+                angle_deg = np.degrees(angle_rad)
+                
+                normalized_angle = 90 + angle_deg if angle_deg < 0 else 90 - angle_deg
+                
+                if last_grey_angle is not None and last_grey_time is not None:
+                    time_diff = time.time() - last_grey_time
+                    if time_diff > 0:
+                        angle_diff = normalized_angle - last_grey_angle
+                        if abs(angle_diff) < 45:
+                            current_grey_velocity = abs(angle_diff) / time_diff
+                
+                last_grey_angle = normalized_angle
+                last_grey_time = time.time()
+            else:
+                current_grey_velocity = 0.0
+                last_grey_angle = None
+                last_grey_time = None
+            
+            # 4. Logic for mouse release & distance
             if grey_center and white_center:
                 distance = np.sqrt((grey_center[0] - white_center[0])**2 + (grey_center[1] - white_center[1])**2)
                 cv2.putText(display_image_bgr, f"Dist: {distance:.1f}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 2)
 
-                # Only release mouse if not currently in cooldown
                 if distance < MIDDLE_THRESHOLD and not cooldown_active:
                     print(f"[{frame_count}] Grey line is in the middle! Releasing mouse.")
                     mouse.release(Button.left)
                     cooldown_active = True
-                    cooldown_start_time = time.time() # Start cooldown timer
+                    cooldown_start_time = time.time()
 
+            # Add velocity text to the preview
+            cv2.putText(display_image_bgr, f"Vel: {current_grey_velocity:.1f} deg/s", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 2)
+                        
             # Put images into queues for GUI thread
             try:
                 image_queue.put_nowait(display_image_bgr)
                 mask_queue_grey.put_nowait(grey_mask)
                 mask_queue_white.put_nowait(white_mask)
-                mask_queue_bar.put_nowait(bar_mask)
+                if bar_mask is not None:
+                    mask_queue_bar.put_nowait(bar_mask)
             except queue.Full:
-                pass # Skip frame if queue is full (GUI is slow)
+                pass
 
             time.sleep(0.01)
 
@@ -300,7 +365,6 @@ def processing_loop():
             time.sleep(1)
 
     print("Processing thread stopped.")
-
 
 # --- Tkinter Setup for Always-on-Top Display ---
 root = tk.Tk()
@@ -332,7 +396,6 @@ bar_mask_window.title("Curved Bar Mask (Dark Area)")
 bar_mask_window.attributes("-topmost", True)
 label_bar_mask = tk.Label(bar_mask_window)
 label_bar_mask.pack()
-
 
 def update_tkinter_image(label, cv_image, tk_window):
     """Helper to convert OpenCV image to PhotoImage and update label."""
@@ -377,7 +440,6 @@ def update_gui_from_queue():
         pass
 
     root.after(10, update_gui_from_queue)
-
 
 # --- Initialize and Start ---
 processing_thread = threading.Thread(target=processing_loop)

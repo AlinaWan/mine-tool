@@ -6,7 +6,7 @@
 
 Mine Tool is currently a Proof of Concept (PoC) Python script designed for partially automating the mining minigame in the Roblox game [*Mine*](https://www.roblox.com/games/115694170181074). This tool utilizes image processing with OpenCV and GUI control with Tkinter to provide real-time visual debugging and automated mouse actions.
 
-https://github.com/user-attachments/assets/b9b0077b-f285-475f-a4c0-fb29c43b4072
+https://github.com/user-attachments/assets/db17faa8-27d7-4fc3-8c01-3bea8252f725
 
 # Setup Instructions
 
@@ -150,6 +150,30 @@ This script uses a `config.ini` file to manage its settings, making it easy to a
   * A lower value (e.g., 5-10) means the grey line needs to be very precisely in the middle.
   * A higher value (e.g., 15-25) allows for a larger "hitbox" around the middle.
 * **Effect:** Controls the precision required for the automated mouse release.
+
+#### BAR\_THICKNESS\_PERCENTAGE
+
+* **What it is:** A floating-point value that defines the thickness of the curved bar as a percentage of the ROI's size. For example, `0.15` means the bar is 15% as thick as the smaller of the ROI's width or height.
+* **How to set:** Adjust this value to match the visual thickness of the curved bar in your game. If the bar seems thicker, increase the value (e.g., to `0.20`); if it seems thinner, decrease it (e.g., to `0.10`).
+
+* **Effect:** This setting is used to generate the curved bar mask, which restricts the detection of the grey and white lines to within the bar's boundaries. A correct value ensures accurate detection.
+
+#### WHITE\_AREA\_WIDTH\_INCREASE
+
+* **What it is:** An integer value that expands the detected white area mask using a morphological dilation operation.
+* **How to set:**
+
+  * A value of `0` means no expansion.
+  * A positive value (e.g., `5`) will make the detected white area larger, which can make it easier to find a match and be more tolerant of color variations or visual noise.
+* **Effect:** A larger value creates a bigger "hitbox" for the white area, making the detection more robust. This is especially useful if the white area is not perfectly solid or if the `COLOR_TOLERANCE` is not high enough.
+
+#### GREY\_LINE\_MIN\_AREA
+* **What it is:** An integer value representing the minimum number of pixels a detected grey contour must have to be considered a valid detection.
+* **How to set:**
+
+  * A lower value (e.g., `10`) is suitable for detecting very thin lines or small sections of a line.
+  * A higher value (e.g., `50`) is for detecting larger, more solid shapes.
+* **Effect:** Since the grey line is often very thin, this value ensures the script doesn't miss small, valid detections while ignoring random noise. When detection is restricted to the curved bar's mask, the line's visible area decreases, making a lower minimum area necessary.
 
 ### \[Automation] Section
 
