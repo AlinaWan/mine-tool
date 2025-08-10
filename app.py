@@ -21,6 +21,9 @@ DEFAULT_CLICK_COOLDOWN_DURATION = 0.5
 DEFAULT_BAR_THICKNESS_PERCENTAGE = 0.15
 DEFAULT_WHITE_AREA_WIDTH_INCREASE = 5
 DEFAULT_GREY_LINE_MIN_AREA = 10
+DEFAULT_PREDICTION_ENABLED = True
+DEFAULT_LOOKAHEAD_FACTOR = 0.05
+DEFAULT_EXPONENTIAL_POWER = 1.05
 
 # --- Config File Handling ---
 CONFIG_FILE = 'config.ini'
@@ -48,7 +51,10 @@ def load_config():
             'GREY_LINE_MIN_AREA': str(DEFAULT_GREY_LINE_MIN_AREA)
         }
         config['Automation'] = {
-            'CLICK_COOLDOWN_DURATION': str(DEFAULT_CLICK_COOLDOWN_DURATION)
+            'CLICK_COOLDOWN_DURATION': str(DEFAULT_CLICK_COOLDOWN_DURATION),
+            'PREDICTION_ENABLED': str(DEFAULT_PREDICTION_ENABLED),
+            'LOOKAHEAD_FACTOR': str(DEFAULT_LOOKAHEAD_FACTOR),
+            'EXPONENTIAL_POWER': str(DEFAULT_EXPONENTIAL_POWER)
         }
         with open(CONFIG_FILE, 'w') as configfile:
             config.write(configfile)
@@ -71,6 +77,9 @@ def load_config():
     grey_line_min_area = config.getint('Detection', 'GREY_LINE_MIN_AREA', fallback=DEFAULT_GREY_LINE_MIN_AREA)
     
     click_cooldown_duration = config.getfloat('Automation', 'CLICK_COOLDOWN_DURATION', fallback=DEFAULT_CLICK_COOLDOWN_DURATION)
+    prediction_enabled = config.getboolean('Automation', 'PREDICTION_ENABLED', fallback=DEFAULT_PREDICTION_ENABLED)
+    lookahead_factor = config.getfloat('Automation', 'LOOKAHEAD_FACTOR', fallback=DEFAULT_LOOKAHEAD_FACTOR)
+    exponential_power = config.getfloat('Automation', 'EXPONENTIAL_POWER', fallback=DEFAULT_EXPONENTIAL_POWER)
 
     return {
         'ROI_X1': roi_x1, 'ROI_Y1': roi_y1, 'ROI_X2': roi_x2, 'ROI_Y2': roi_y2,
@@ -79,7 +88,10 @@ def load_config():
         'CLICK_COOLDOWN_DURATION': click_cooldown_duration,
         'BAR_THICKNESS_PERCENTAGE': bar_thickness_percentage,
         'WHITE_AREA_WIDTH_INCREASE': white_area_width_increase,
-        'GREY_LINE_MIN_AREA': grey_line_min_area
+        'GREY_LINE_MIN_AREA': grey_line_min_area,
+        'PREDICTION_ENABLED': prediction_enabled,
+        'LOOKAHEAD_FACTOR': lookahead_factor,
+        'EXPONENTIAL_POWER': exponential_power
     }
 
 # Load configuration at script start
@@ -95,6 +107,9 @@ CLICK_COOLDOWN_DURATION = settings['CLICK_COOLDOWN_DURATION']
 BAR_THICKNESS_PERCENTAGE = settings['BAR_THICKNESS_PERCENTAGE']
 WHITE_AREA_WIDTH_INCREASE = settings['WHITE_AREA_WIDTH_INCREASE']
 GREY_LINE_MIN_AREA = settings['GREY_LINE_MIN_AREA']
+PREDICTION_ENABLED = settings['PREDICTION_ENABLED']
+LOOKAHEAD_FACTOR = settings['LOOKAHEAD_FACTOR']
+EXPONENTIAL_POWER = settings['EXPONENTIAL_POWER']
 
 # Mouse controller setup
 mouse = MouseController()
@@ -116,6 +131,10 @@ cooldown_start_time = 0
 last_grey_angle = None
 last_grey_time = None
 current_grey_velocity = 0.0
+
+# Variables for dynamic prediction
+last_grey_distance = None
+current_distance_velocity = 0.0
 
 # --- Helper Functions ---
 
@@ -236,17 +255,23 @@ TARGET_WHITE_BGR = hex_to_bgr(HEX_WHITE)
 
 # --- Main Processing Loop (runs in a separate thread) ---
 def processing_loop():
-    global running, cooldown_active, cooldown_start_time, last_grey_angle, last_grey_time, current_grey_velocity
+    global running, cooldown_active, cooldown_start_time, last_grey_angle, last_grey_time, current_distance_velocity
     print("Starting detection script. Press 'Esc' to stop.")
     print(f"Monitoring region: ({ROI_X1},{ROI_Y1}) to ({ROI_X2},{ROI_Y2})")
     print(f"Target Grey BGR: {TARGET_GREY_BGR}, Target White BGR: {TARGET_WHITE_BGR}")
 
     frame_count = 0
+    # Add a variable to store the last arc distance for velocity calculation
+    last_arc_distance = None
+
+    # Define the arc center in local ROI coordinates
+    roi_height = ROI_Y2 - ROI_Y1
+    arc_center = (0, roi_height)
+
     while running:
         try:
             frame_count += 1
             
-            # Check if cooldown is active
             if cooldown_active:
                 if time.time() - cooldown_start_time >= CLICK_COOLDOWN_DURATION:
                     cooldown_active = False
@@ -258,18 +283,15 @@ def processing_loop():
 
             display_image_bgr = screenshot_bgr.copy()
 
-            # 1. Detect Curved Bar (generate a mask of the valid area)
+            # 1. Detect Curved Bar
             bar_contour, bar_mask = detect_curved_bar(
-                screenshot_bgr, ROI_X2 - ROI_X1, ROI_Y2 - ROI_Y1, BAR_THICKNESS_PERCENTAGE
+                screenshot_bgr, ROI_X2 - ROI_X1, roi_height, BAR_THICKNESS_PERCENTAGE
             )
             
             if bar_contour is not None:
                 cv2.drawContours(display_image_bgr, [bar_contour], -1, (0, 0, 255), 2)
-                if bar_contour.shape[0] > 0:
-                    cv2.putText(display_image_bgr, "Bar", (bar_contour[0][0][0] + 10, bar_contour[0][0][1] - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-
-            # 2. Detect White Area using BGR, limited by the bar mask
+            
+            # 2. Detect White Area
             white_center, white_contour, white_mask, _ = find_colored_area_bgr(
                 screenshot_bgr, TARGET_WHITE_BGR, COLOR_TOLERANCE, 
                 expand_width=WHITE_AREA_WIDTH_INCREASE, limit_mask=bar_mask
@@ -277,77 +299,77 @@ def processing_loop():
             if white_center:
                 cv2.circle(display_image_bgr, white_center, 7, (0, 255, 0), -1)
                 cv2.drawContours(display_image_bgr, [white_contour], -1, (0, 255, 0), 2)
-                cv2.putText(display_image_bgr, "White", (white_center[0] + 10, white_center[1] - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-            # 3. Detect Grey Line using BGR, limited by the bar mask
-            grey_center, grey_contour, grey_mask, grey_rect = find_colored_area_bgr(
+            # 3. Detect Grey Line
+            grey_center, grey_contour, grey_mask, _ = find_colored_area_bgr(
                 screenshot_bgr, TARGET_GREY_BGR, COLOR_TOLERANCE, 
-                min_area=GREY_LINE_MIN_AREA, # <-- Use the new constant here
+                min_area=GREY_LINE_MIN_AREA,
                 limit_mask=bar_mask
             )
             
-            # --- Velocity Calculation & Display ---
-            if grey_center:
-                cv2.circle(display_image_bgr, grey_center, 5, (255, 0, 0), -1)
-                cv2.drawContours(display_image_bgr, [grey_contour], -1, (255, 0, 0), 2)
-                cv2.putText(display_image_bgr, "Grey", (grey_center[0] + 10, grey_center[1] + 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+            # --- Arc Distance & Velocity Calculation ---
+            trigger_distance = float('inf')
+            current_arc_velocity = 0.0
+
+            if grey_center and white_center:
+                # Calculate angles relative to the arc center
+                dx_grey = grey_center[0] - arc_center[0]
+                dy_grey = grey_center[1] - arc_center[1]
+                angle_grey_rad = np.arctan2(dy_grey, dx_grey)
                 
-                if grey_rect:
-                    box = np.int32(cv2.boxPoints(grey_rect))
-                    cv2.drawContours(display_image_bgr, [box], 0, (0, 255, 255), 2)
-                    (x, y), (w, h), angle = grey_rect
-                    radians = np.deg2rad(angle)
-                    length = max(w, h) / 2
-                    end_x = int(x + length * np.cos(radians))
-                    end_y = int(y + length * np.sin(radians))
-                    start_x = int(x - length * np.cos(radians))
-                    start_y = int(y - length * np.sin(radians))
-                    cv2.line(display_image_bgr, (start_x, start_y), (end_x, end_y), (255, 0, 255), 2)
+                dx_white = white_center[0] - arc_center[0]
+                dy_white = white_center[1] - arc_center[1]
+                angle_white_rad = np.arctan2(dy_white, dx_white)
+
+                # Calculate the radius of the grey line's path
+                radius = np.sqrt(dx_grey**2 + dy_grey**2)
                 
-                # Semi-circle center (bottom-left of ROI)
-                semi_circle_center_x = 0
-                semi_circle_center_y = ROI_Y2 - ROI_Y1
-                
-                dx = grey_center[0] - semi_circle_center_x
-                dy = grey_center[1] - semi_circle_center_y
-                
-                angle_rad = np.arctan2(dy, dx)
-                angle_deg = np.degrees(angle_rad)
-                
-                normalized_angle = 90 + angle_deg if angle_deg < 0 else 90 - angle_deg
-                
-                if last_grey_angle is not None and last_grey_time is not None:
+                # Calculate the arc distance
+                arc_distance = abs(angle_grey_rad - angle_white_rad) * radius
+
+                # Calculate velocity based on arc distance
+                if last_arc_distance is not None and last_grey_time is not None:
                     time_diff = time.time() - last_grey_time
                     if time_diff > 0:
-                        angle_diff = normalized_angle - last_grey_angle
-                        if abs(angle_diff) < 45:
-                            current_grey_velocity = abs(angle_diff) / time_diff
+                        distance_diff = arc_distance - last_arc_distance
+                        current_arc_velocity = distance_diff / time_diff
                 
-                last_grey_angle = normalized_angle
+                # Update last values for the next frame's calculation
+                last_arc_distance = arc_distance
                 last_grey_time = time.time()
+
+                # --- Dynamic Prediction Logic ---
+                if PREDICTION_ENABLED:
+                    prediction_offset = LOOKAHEAD_FACTOR * pow(abs(current_arc_velocity), EXPONENTIAL_POWER)
+                    
+                    if current_arc_velocity < 0:
+                        trigger_distance = arc_distance + prediction_offset
+                    else:
+                        trigger_distance = arc_distance
+                else:
+                    trigger_distance = arc_distance
+
+                # Draw circle and contour for grey line
+                cv2.circle(display_image_bgr, grey_center, 5, (255, 0, 0), -1)
+                cv2.drawContours(display_image_bgr, [grey_contour], -1, (255, 0, 0), 2)
+            
             else:
-                current_grey_velocity = 0.0
-                last_grey_angle = None
+                current_arc_velocity = 0.0
+                last_arc_distance = None
                 last_grey_time = None
             
-            # 4. Logic for mouse release & distance
-            if grey_center and white_center:
-                distance = np.sqrt((grey_center[0] - white_center[0])**2 + (grey_center[1] - white_center[1])**2)
-                cv2.putText(display_image_bgr, f"Dist: {distance:.1f}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 2)
-
-                if distance < MIDDLE_THRESHOLD and not cooldown_active:
-                    print(f"[{frame_count}] Grey line is in the middle! Releasing mouse.")
-                    mouse.release(Button.left)
-                    cooldown_active = True
-                    cooldown_start_time = time.time()
-
-            # Add velocity text to the preview
-            cv2.putText(display_image_bgr, f"Vel: {current_grey_velocity:.1f} deg/s", (10, 50),
+            # Add velocity and trigger distance text to the preview
+            cv2.putText(display_image_bgr, f"Arc Vel: {current_arc_velocity:.1f} pix/s", (10, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 2)
-                        
+            cv2.putText(display_image_bgr, f"Trigger Dist: {trigger_distance:.1f}", (10, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 2)
+            
+            if trigger_distance < MIDDLE_THRESHOLD and not cooldown_active:
+                print(f"[{frame_count}] Predicted position is in the middle! Releasing mouse.")
+                mouse.release(Button.left)
+                cooldown_active = True
+                cooldown_start_time = time.time()
+            
             # Put images into queues for GUI thread
             try:
                 image_queue.put_nowait(display_image_bgr)
