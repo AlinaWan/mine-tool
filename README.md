@@ -223,12 +223,6 @@ This script uses a `config.ini` file to manage its settings, making it easy to a
 
 # Troubleshooting
 
-* **The program crashes when I switch focus to another application:**
-  This issue should be resolved by the multithreaded design. If it persists, ensure your Python environment and dependencies are correctly installed.
-
-* **The debug windows appear to "freeze" briefly after a mouse click:**
-  This is expected behavior as the script enters a `CLICK_COOLDOWN_DURATION`. During this time, the mouse will not be released again, but the GUI and tracking continue. Adjust the `CLICK_COOLDOWN_DURATION` in `config.ini` to a shorter value if desired.
-
 * **Nothing is being detected at all:**
   Increase the `COLOR_TOLERANCE` slider in `config.ini`. The app might be too strict in matching colors, especially if your screen has unusual brightness or color settings.
 
