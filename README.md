@@ -4,7 +4,7 @@
 
 # Overview
 
-Mine Tool is currently a Proof of Concept (PoC) Python script designed for partially automating the mining minigame in the Roblox game ["Mine"](https://www.roblox.com/games/115694170181074). This tool utilizes image processing with OpenCV and GUI control with Tkinter to provide real-time visual debugging and automated mouse actions.
+Mine Tool is currently a Proof of Concept (PoC) Python script designed for partially automating the mining minigame in the Roblox game [*Mine*](https://www.roblox.com/games/115694170181074). This tool utilizes image processing with OpenCV and GUI control with Tkinter to provide real-time visual debugging and automated mouse actions.
 
 https://github.com/user-attachments/assets/b9b0077b-f285-475f-a4c0-fb29c43b4072
 
@@ -60,7 +60,7 @@ python app.py
 
 An example ROI (Region of Interest) image is shown below. The default values are configured for:
 
-- Screen resolution: **1920×1080**  
+- Screen resolution: **1920Ã—1080**  
 - Operating System: **Windows 11**  
 - Roblox running in **windowed mode**
 
@@ -179,7 +179,7 @@ This script uses a `config.ini` file to manage its settings, making it easy to a
   Increase the `COLOR_TOLERANCE` slider in `config.ini`. The app might be too strict in matching colors, especially if your screen has unusual brightness or color settings.
 
 * **Wrong elements are being detected or multiple parts of the same element are detected separately:**
-  Decrease the `COLOR_TOLERANCE` in `config.ini`. It’s likely the app is being too lenient and is matching different colors as the same element. You might also need to refine your ROI to exclude irrelevant parts of the screen.
+  Decrease the `COLOR_TOLERANCE` in `config.ini`. ItÂ’s likely the app is being too lenient and is matching different colors as the same element. You might also need to refine your ROI to exclude irrelevant parts of the screen.
 
 # End Notes
 
