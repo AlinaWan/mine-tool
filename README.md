@@ -54,7 +54,10 @@ python app.py
 6. **Set Cooldown:**
    Configure `CLICK_COOLDOWN_DURATION` to set a delay after a mouse release, preventing rapid re-clicks.
 
-7. Save `config.ini` and re-run the script.
+7. **Set Prediction:**
+   If desired, enable/disable `PREDICTION_ENABLED` and adjust `LOOKAHEAD_FACTOR` and `EXPONENTIAL_POWER` to fine-tune how the script predicts the grey line's movement.
+
+8. Save `config.ini` and re-run the script.
 
 ### Example ROI Setup
 
@@ -184,6 +187,33 @@ This script uses a `config.ini` file to manage its settings, making it easy to a
   If set to `0.5`, the script will release the mouse, then wait for 0.5 seconds without releasing the mouse again, before becoming ready for another release.
   Adjust based on the timing needed in your mini-game.
 * **Effect:** Prevents rapid, unintended multiple clicks and allows for a "rest" period. During this cooldown, the visual debugging windows will continue to update, as the core processing loop is not blocked.
+
+#### PREDICTION\_ENABLED
+
+* **What it is:** A boolean value (`True` or `False`) that acts as a toggle for the velocity-based prediction system.
+* **How to set:**
+
+  * Set to `True` to enable the script to predict the future position of the grey line based on its velocity.
+  * Set to `False` to disable prediction. The script will use the logic of releasing the mouse only when the grey line is physically within the `MIDDLE_THRESHOLD`.
+* **Effect:** Allows you to switch between a reactive (non-predictive) and a proactive (predictive) approach to mouse releases.
+
+#### LOOKAHEAD\_FACTOR
+
+* **What it is:** A floating-point value that scales how far into the future the script predicts the grey line's position. This factor is a key multiplier for the velocity.
+* **How to set:**
+
+  * A larger value (e.g., `0.20`) makes the script release the mouse earlier, which is useful for faster-moving grey lines or to compensate for system latency.
+  * A smaller value (e.g., `0.05`) makes the script release the mouse later, closer to the white area.
+* **Effect:** Directly controls the aggressiveness of the prediction. A higher value means the script "looks ahead" further, while a lower value means it waits until the grey line is closer to the target.
+
+#### EXPONENTIAL\_POWER
+
+* **What it is:** A floating-point value that defines the exponent used to calculate the prediction offset. A value greater than `1.0` introduces an exponential relationship between velocity and prediction.
+* **How to set:**
+
+  * A value of `1.0` means the prediction is linear (the prediction offset is directly proportional to velocity).
+  * A value like `1.5` or `2.0` will make the prediction offset increase dramatically with higher velocities, while having a minimal effect on slower movements.
+* **Effect:** Allows you to fine-tune the sensitivity of the prediction system. It makes the script more responsive to sudden, fast movements while remaining stable during slow movements.
 
 # Notes
 
