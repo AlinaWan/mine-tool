@@ -6,7 +6,9 @@
 
 Mine Tool is currently a Proof of Concept (PoC) Python script designed for partially automating the mining minigame in the Roblox game [*Mine*](https://www.roblox.com/games/115694170181074). This tool utilizes image processing with OpenCV and GUI control with Tkinter to provide real-time visual debugging and automated mouse actions.
 
-https://github.com/user-attachments/assets/db17faa8-27d7-4fc3-8c01-3bea8252f725
+https://github.com/user-attachments/assets/7cb4eda6-5795-487b-8c07-e1e567bf5345
+
+https://github.com/user-attachments/assets/29b83713-15a5-46f7-b250-d54cef50f851
 
 # Setup Instructions
 
