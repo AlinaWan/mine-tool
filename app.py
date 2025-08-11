@@ -1,4 +1,4 @@
-﻿﻿# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 __version__ = "1.0.0-beta.1"
 __author__ = "Riri"
 __license__ = "MPL-2.0"
