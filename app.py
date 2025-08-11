@@ -1,3 +1,8 @@
+﻿﻿# -*- coding: utf-8 -*-
+__version__ = "1.0.0-beta.1"
+__author__ = "Riri"
+__license__ = "MPL-2.0"
+
 import cv2
 import numpy as np
 from PIL import ImageGrab, Image, ImageTk
@@ -307,7 +312,7 @@ def processing_loop():
                 limit_mask=bar_mask
             )
             
-            # --- Arc Distance & Velocity Calculation ---
+            # --- Arc Distance & Velocity Calculation & Visualization ---
             trigger_distance = float('inf')
             current_arc_velocity = 0.0
 
@@ -320,6 +325,14 @@ def processing_loop():
                 dx_white = white_center[0] - arc_center[0]
                 dy_white = white_center[1] - arc_center[1]
                 angle_white_rad = np.arctan2(dy_white, dx_white)
+
+                # Convert angles to degrees for drawing
+                angle_grey_deg = np.degrees(angle_grey_rad)
+                angle_white_deg = np.degrees(angle_white_rad)
+                
+                # Normalize angles to the 1st quadrant range (270 to 360) for drawing
+                angle_grey_deg_norm = (angle_grey_deg + 360) % 360
+                angle_white_deg_norm = (angle_white_deg + 360) % 360
 
                 # Calculate the radius of the grey line's path
                 radius = np.sqrt(dx_grey**2 + dy_grey**2)
@@ -352,6 +365,24 @@ def processing_loop():
                 # Draw circle and contour for grey line
                 cv2.circle(display_image_bgr, grey_center, 5, (255, 0, 0), -1)
                 cv2.drawContours(display_image_bgr, [grey_contour], -1, (255, 0, 0), 2)
+
+                # --- Draw the Arc Path and Angle Lines ---
+                # 1. Draw the grey angle line
+                grey_line_end = (int(arc_center[0] + radius * np.cos(angle_grey_rad)),
+                                 int(arc_center[1] + radius * np.sin(angle_grey_rad)))
+                cv2.line(display_image_bgr, arc_center, grey_line_end, (255, 0, 0), 1)
+
+                # 2. Draw the white area angle line
+                white_line_end = (int(arc_center[0] + radius * np.cos(angle_white_rad)),
+                                  int(arc_center[1] + radius * np.sin(angle_white_rad)))
+                cv2.line(display_image_bgr, arc_center, white_line_end, (0, 255, 0), 1)
+
+                # 3. Draw the connecting arc
+                # Determine start and end angles for the arc path
+                start_angle = min(angle_grey_deg_norm, angle_white_deg_norm)
+                end_angle = max(angle_grey_deg_norm, angle_white_deg_norm)
+                cv2.ellipse(display_image_bgr, arc_center, (int(radius), int(radius)),
+                            0, start_angle, end_angle, (255, 255, 255), 2)
             
             else:
                 current_arc_velocity = 0.0
